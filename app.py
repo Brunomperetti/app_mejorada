@@ -17,46 +17,35 @@ def cargar_datos(uploaded_file):
         df = pd.read_excel(uploaded_file)
         df.columns = df.columns.str.replace(" ", "_").str.upper()
         # Descartar columnas futuras o de año, ajustando según la lógica original
-        # Ajuste para leer 'AÑO_MES_NUMERO' independientemente del año específico 2024_2025
-        # Descartamos cualquier columna MES_ que no contenga un número al final válido
-        descartar = [col for col in df.columns if "MES_" in col and not col.split("_")[-1].isdigit()]
-        # Descartamos columnas de AÑO_
+        # Usamos la lógica de descarte de tu código original
+        descartar = [col for col in df.columns if "MES_" in col and "2024_2025" in col and int(col.split("_")[-1]) > 16]
         descartar += [col for col in df.columns if "ANO_" in col]
-
-        # Lógica para descartar meses futuros si la columna tiene un formato específico (opcional, si aplica)
-        # Aquí se asume que las columnas que terminan en _17, _18, etc., son futuras para el período 2024_2025
-        # Puedes ajustar esta lógica si tus datos tienen otra convención
-        descartar += [col for col in df.columns if "MES_" in col and "2024_2025" in col and int(col.split("_")[-1]) > 16] # Ejemplo de descarte específico
-
-        df.drop(columns=descartar, errors='ignore', inplace=True) # Usar errors='ignore' para no fallar si alguna columna no existe
-        df["CLASE"] = df["RUBRO"].replace("ACUARISMO", "COMERCIO") # Ajuste de rubro
+        df.drop(columns=descartar, inplace=True, errors='ignore') # Añadimos errors='ignore' por seguridad
+        df["CLASE"] = df["RUBRO"].replace("ACUARISMO", "COMERCIO")
         return df
     except Exception as e:
         st.error(f"Error al cargar el archivo: {e}")
         return None
 
 def clasificar_cliente(row, columnas_meses):
-    """Clasifica al cliente basado en la frecuencia y el promedio de compra (lógica original)."""
-    # OJO: Esta función usa la lógica original de promedio sobre MESES CON COMPRA > 0.
-    # Si quieres que la clasificación use el promedio sobre los 12 meses (incluyendo ceros),
-    # habría que modificar esta función y redefinir las reglas de clasificación.
-    # Por ahora, la mantenemos igual para no alterar las categorías existentes.
+    """Clasifica al cliente basado en la frecuencia y el promedio de compra."""
+    # Mantenemos la lógica de clasificación original, que usa el promedio solo de meses con compra.
+    # Si quisieras que esta clasificación usara el promedio sobre 12 meses (incluyendo ceros),
+    # habría que redefinir las reglas aquí, lo cual no es el objetivo actual.
     compras = row[columnas_meses]
     frecuencia = (compras > 0).sum()
     monto_total = compras.sum()
     promedio_mensual = monto_total / frecuencia if frecuencia > 0 else 0
 
-    # Lógica para identificar actividad reciente
-    ultimos_6_meses = columnas_meses[-6:] if len(columnas_meses) >= 6 else columnas_meses
+    ultimos_6_meses = columnas_meses[-6:] if len(columnas_meses) >= 6 else columnas_meses # Asegurar que haya al menos 6 meses
     compras_ultimos_6 = row[ultimos_6_meses]
     activo_ultimos_6 = (compras_ultimos_6 > 0).any()
 
     if frecuencia == 0 or promedio_mensual < 300_000:
         return "potencial"
 
-    # Ajuste en la lógica inactivo para asegurar que haya tenido compras alguna vez
     if not activo_ultimos_6 and frecuencia >= 1 and frecuencia <= 3:
-         return "inactivo"
+        return "inactivo"
 
     if frecuencia >= 8:
         return "habitualgold" if promedio_mensual > 5_000_000 else "habitual"
@@ -68,7 +57,6 @@ def clasificar_cliente(row, columnas_meses):
         return "esporadico"
 
     return "potencial" # Caso por defecto para evitar errores
-
 
 # --- PARÁMETROS ---
 OBJETIVOS = {
@@ -93,10 +81,10 @@ if uploaded_file is not None:
     ventas = cargar_datos(uploaded_file)
     if ventas is not None:
         # Asegurarse de que solo se seleccionen columnas de meses válidas y ordenarlas
-        # La clave de ordenamiento mejorada maneja mejor formatos como '2023_MES_1', '2024_MES_15'
+        # Usamos la clave de ordenamiento de tu código original, con pequeña mejora de seguridad
         columnas_meses = sorted(
             [col for col in ventas.columns if "MES_" in col and len(col.split('_')) >= 3 and col.split('_')[-1].isdigit()],
-            key=lambda x: (int(x.split("_")[0]) if x.split("_")[0].isdigit() else 0, int(x.split("_")[-1]) if x.split("_")[-1].isdigit() else 0)
+            key=lambda x: (int(x.split("_")[0]) if x.split("_")[0].isdigit() else 0, int(x.split("_")[-1]) if x.split("_")[-1].isdigit() else 0) # Manejo básico de error por si el split falla
         )
 
         # Asegurarse de que las columnas de meses existan antes de usarlas
@@ -106,7 +94,6 @@ if uploaded_file is not None:
 
         ventas[columnas_meses] = ventas[columnas_meses].fillna(0).astype(float)
 
-        # Aplicar clasificación original
         ventas["CLASE_CLIENTE"] = ventas.apply(lambda row: clasificar_cliente(row, columnas_meses), axis=1)
         ventas["ACCION_MARKETING"] = ventas["CLASE_CLIENTE"].map(ACCIONES_MARKETING)
 
@@ -121,20 +108,17 @@ if uploaded_file is not None:
         # --- MODO CLIENTE ---
         if modo_busqueda == "Por Cliente":
             cliente_codigo = st.sidebar.text_input("Código del Cliente:")
-            # Asegurarse de que haya clientes antes de llenar el selectbox
-            # Mostrar selectbox solo si no se ingresó código y hay nombres disponibles
+            # Ajuste: solo mostrar selectbox si no hay código y hay nombres
+            cliente_nombre = None
             if not cliente_codigo and not ventas["NOM_LEGAL"].dropna().empty:
-                cliente_nombre = st.sidebar.selectbox("Seleccioná un cliente", sorted(ventas["NOM_LEGAL"].dropna().unique()))
-            else:
-                cliente_nombre = None
-                # st.sidebar.warning("No hay nombres de clientes disponibles o se buscó por código.") # Comentado para no saturar
+                 cliente_nombre = st.sidebar.selectbox("Seleccioná un cliente", sorted(ventas["NOM_LEGAL"].dropna().unique()))
+
 
             df_filtrado = pd.DataFrame() # Inicializar vacío
             if cliente_codigo:
-                df_filtrado = ventas[ventas["CODIGO"].astype(str).str.strip() == cliente_codigo.strip()].copy()
+                df_filtrado = ventas[ventas["CODIGO"].astype(str).str.strip() == cliente_codigo.strip()].copy() # Usar .copy() para evitar SettingWithCopyWarning
             elif cliente_nombre:
-                df_filtrado = ventas[ventas["NOM_LEGAL"] == cliente_nombre].copy()
-            # Si no se ingresa código ni se selecciona nombre, df_filtrado permanece vacío
+                df_filtrado = ventas[ventas["NOM_LEGAL"] == cliente_nombre].copy() # Usar .copy()
 
 
             if not df_filtrado.empty:
@@ -149,18 +133,20 @@ if uploaded_file is not None:
                     st.markdown(f"- **Provincia:** {cliente.get('PROVINCIA', 'No disponible')}")
                     st.markdown(f"- **Teléfono:** {cliente.get('TELEFONO', 'No disponible')}")
 
-                    # --- CALCULO DE PROMEDIO Y TOTAL ULTIMOS 12 MESES (INCLUYENDO CEROS) ---
+                    # --- CALCULO DE PROMEDIO ULTIMOS 12 MESES (INCLUYENDO CEROS) ---
+                    # Tomamos los últimos 12 meses o menos si no hay tantos
                     meses_ultimos_12 = columnas_meses[-12:] if len(columnas_meses) >= 12 else columnas_meses
                     total_ultimos_12 = cliente[meses_ultimos_12].sum()
+                    # Dividimos por la cantidad total de meses evaluados
                     num_meses_evaluar_cliente = len(meses_ultimos_12)
 
                     # Calcular promedio incluyendo ceros
                     promedio_ultimos_12_con_ceros = total_ultimos_12 / num_meses_evaluar_cliente if num_meses_evaluar_cliente > 0 else 0
                     # --- FIN CALCULO PROMEDIO CON CEROS ---
 
-
+                    # Mostramos el nuevo promedio calculado
                     st.markdown(f"- **Promedio Compra ({num_meses_evaluar_cliente} meses, incl. ceros):** ${promedio_ultimos_12_con_ceros:,.2f}")
-                    st.markdown(f"- **Total Comprado ({num_meses_evaluar_cliente} meses):** ${total_ultimos_12:,.2f}")
+                    st.markdown(f"- **Total Comprado ({num_meses_evaluar_cliente} meses):** ${total_ultimos_12:,.2f}") # Mantenemos el total de los meses evaluados
 
                     descuento = OBJETIVOS.get(cliente["CLASE"], {}).get("DESCUENTO", "No definido")
                     st.markdown(f"- **Descuento:** {descuento}")
@@ -188,7 +174,7 @@ if uploaded_file is not None:
                 st.dataframe(styled_df, use_container_width=True)
 
                 # --- GRÁFICO DE BARRAS MEJORADO ---
-                st.markdown("### 📊 Evolución de Compras")
+                st.markdown("### 📊 Evolución de Compras") # Título más genérico
                 # Asegurarse de tener suficientes meses para graficar los últimos 24
                 num_meses_total = len(columnas_meses)
                 meses_para_grafico = columnas_meses[-24:] if num_meses_total >= 24 else columnas_meses # Graficar hasta 24 meses o todos
@@ -239,146 +225,127 @@ if uploaded_file is not None:
         else:
             st.sidebar.subheader("⚙️ Filtros de Segmentación")
 
-            # --- FILTRO POR RUBRO ---
-            st.sidebar.subheader("⚙️ Filtrar por Rubro")
-            # Obtener la lista única de rubros del dataset cargado (excluyendo NaN)
-            rubros_disponibles = sorted(ventas['RUBRO'].dropna().unique())
-            # Añadir una opción para seleccionar todos por defecto o permitir vacio para no filtrar
-            rubros_seleccionados = st.sidebar.multiselect("Selecciona Rubro(s)", rubros_disponibles, default=rubros_disponibles)
+            # Asegurarse de que hay suficientes meses para la frecuencia y promedio
+            meses_para_filtros = columnas_meses[-12:] if len(columnas_meses) >= 12 else columnas_meses
+            num_meses_filtros = len(meses_para_filtros)
 
-            # Aplicar filtro de rubro
+            # Mensaje si hay menos de 12 meses
+            if len(columnas_meses) > 0 and len(columnas_meses) < 12:
+                st.warning(f"Solo se encontraron {len(columnas_meses)} meses de datos. Los filtros de frecuencia y promedio se aplicarán sobre los meses disponibles.")
+            elif len(columnas_meses) == 0:
+                 st.warning("No se encontraron columnas de meses válidas para los filtros.")
+
+            # Filtro de Frecuencia con slider (como en tu código)
+            segmento_frecuencia = st.sidebar.slider(f"Frecuencia de Compra ({num_meses_filtros} meses)", 0, num_meses_filtros, (0, num_meses_filtros))
+
+
+            st.sidebar.subheader(f"💰 Filtrar por Promedio Mensual de Compra ({num_meses_filtros} meses, incl. ceros)")
+            # --- CAMBIO: Usar number_input en lugar de slider para el promedio ---
+            # Calculamos un valor por defecto para el máximo, pero el input permite escribir más
+            max_total_posible = ventas[meses_para_filtros].sum(axis=1).max() if num_meses_filtros > 0 and not ventas[meses_para_filtros].empty else 0
+            max_promedio_sugerido = (max_total_posible / num_meses_filtros) if num_meses_filtros > 0 and max_total_posible > 0 else 1000000
+            max_promedio_default = int(max_promedio_sugerido * 1.5) + 100000
+
+            min_promedio = st.sidebar.number_input("Mínimo Promedio Mensual", min_value=0, step=100_000, value=0)
+            max_promedio = st.sidebar.number_input("Máximo Promedio Mensual", min_value=0, step=100_000, value=max_promedio_default) # Puedes ajustar el 'value' inicial
+            # --- FIN CAMBIO number_input ---
+
+
+            st.sidebar.subheader("⚙️ Filtrar por Rubro")
+            # Usamos los checkboxes originales de tu código
+            mostrar_comercio = st.sidebar.checkbox("Comercio", value=True)
+            mostrar_acuarismo = st.sidebar.checkbox("Acuarismo", value=True)
+            mostrar_distribuidor = st.sidebar.checkbox("Distribuidor", value=True)
+
+            rubros_seleccionados = []
+            if mostrar_comercio:
+                rubros_seleccionados.append("COMERCIO")
+            if mostrar_acuarismo:
+                rubros_seleccionados.append("ACUARISMO")
+            if mostrar_distribuidor:
+                rubros_seleccionados.append("DISTRIBUIDOR")
+
+
+            # Aplicar filtro de rubro primero
             if rubros_seleccionados:
                  df_segmento_filtrado = ventas[ventas['RUBRO'].isin(rubros_seleccionados)].copy()
             else:
-                 df_segmento_filtrado = ventas[ventas['RUBRO'].isin([])].copy() # Devuelve un DataFrame vacío si no hay rubros seleccionados
-            # --- FIN FILTRO POR RUBRO ---
+                 df_segmento_filtrado = ventas[ventas['RUBRO'].isin([])].copy() # Retorna vacío si no hay rubros
 
+            # --- CALCULAR FRECUENCIA Y EL NUEVO PROMEDIO PARA EL FILTRADO ---
+            if num_meses_filtros > 0 and not df_segmento_filtrado.empty:
+                 # Frecuencia (meses con compra > 0) - se mantiene este cálculo para el filtro de frecuencia
+                 df_segmento_filtrado['FRECUENCIA_FILTRO'] = df_segmento_filtrado[meses_para_filtros].apply(lambda row: (row > 0).sum(), axis=1)
 
-            # Asegurarse de que hay suficientes meses para la frecuencia y promedio de 12 meses *después de filtrar por rubro*
-            if len(columnas_meses) < 12:
-                 # Solo emitir la advertencia si el dataframe filtrado no está vacío
-                 if not df_segmento_filtrado.empty:
-                    st.warning(f"Solo se encontraron {len(columnas_meses)} meses de datos en el archivo. Los filtros de frecuencia y promedio se aplicarán sobre los meses disponibles.")
-                 meses_para_filtros = columnas_meses
-                 num_meses_filtros = len(columnas_meses)
+                 # Nuevo Promedio (total comprado en el período dividido por el número total de meses en el período)
+                 total_comprado_filtro = df_segmento_filtrado[meses_para_filtros].sum(axis=1)
+                 df_segmento_filtrado['PROMEDIO_FILTRO'] = total_comprado_filtro / num_meses_filtros # ¡Este es el cambio clave!
             else:
-                 meses_para_filtros = columnas_meses[-12:]
-                 num_meses_filtros = 12
+                 # Si no hay meses de filtro o el dataframe está vacío, estas columnas estarán vacías
+                 df_segmento_filtrado['FRECUENCIA_FILTRO'] = pd.Series(dtype=float)
+                 df_segmento_filtrado['PROMEDIO_FILTRO'] = pd.Series(dtype=float)
+            # --- FIN CALCULOS PARA FILTRADO ---
 
 
-            # Asegurarse de que num_meses_filtros sea mayor que 0 para evitar división por cero
-            if num_meses_filtros == 0:
-                st.warning("No hay columnas de meses válidas para calcular la frecuencia o el promedio.")
-                # Definir un DataFrame vacío con las columnas que deberían mostrarse
-                columnas_segmento_base = [
-                    "CODIGO", "NOM_LEGAL", "CLASE", "E_MAIL", "TELEFONO", "PROVINCIA",
-                    f"Frecuencia (0m)", f"Promedio (0m incl. 0)"
-                    ]
-                df_segmento_final = pd.DataFrame(columns=columnas_segmento_base)
-
+            # --- APLICAR FILTROS (FRECUENCIA Y NUEVO PROMEDIO) ---
+            # Solo aplicar si hay meses de filtro disponibles, de lo contrario df_segmento_final estará vacío
+            if num_meses_filtros > 0:
+                 df_segmento_final = df_segmento_filtrado[
+                     (df_segmento_filtrado['FRECUENCIA_FILTRO'] >= segmento_frecuencia[0]) &
+                     (df_segmento_filtrado['FRECUENCIA_FILTRO'] <= segmento_frecuencia[1]) &
+                     (df_segmento_filtrado['PROMEDIO_FILTRO'] >= min_promedio) & # Usamos min_promedio
+                     (df_segmento_filtrado['PROMEDIO_FILTRO'] <= max_promedio) # Usamos max_promedio
+                 ].copy()
             else:
+                 # Si num_meses_filtros es 0, no hay datos para filtrar, se usa el df vacío inicial
+                 df_segmento_final = df_segmento_filtrado # Que ya estará vacío
+            # --- FIN APLICAR FILTROS ---
 
-                segmento_frecuencia = st.sidebar.slider(f"Frecuencia de Compra ({num_meses_filtros} meses)", 0, num_meses_filtros, (0, num_meses_filtros))
-
-                st.sidebar.subheader(f"💰 Filtrar por Promedio Mensual de Compra ({num_meses_filtros} meses, incl. ceros)")
-                # Calcular el máximo promedio posible para el slider *sobre el dataframe filtrado por rubro*
-                max_monto_global_filtrado = df_segmento_filtrado[meses_para_filtros].values.max() if not df_segmento_filtrado[meses_para_filtros].empty else 0
-                max_promedio_posible = (max_monto_global_filtrado / num_meses_filtros) if num_meses_filtros > 0 and max_monto_global_filtrado > 0 else 1000000 # Evitar division por cero o valores muy bajos
-                max_promedio_default = int(max_promedio_posible * 1.5) + 100000 # Un poco por encima del max real
-
-
-                min_promedio = st.sidebar.number_input("Mínimo Promedio Mensual", min_value=0, step=100_000, value=0)
-                max_promedio = st.sidebar.number_input("Máximo Promedio Mensual", min_value=0, step=100_000, value=max_promedio_default)
-
-
-                # --- CALCULAR FRECUENCIA Y PROMEDIO PARA EL FILTRADO (SOBRE LOS MESES SELECCIONADOS Y RUBRO FILTRADO) ---
-                # Asegurarse de que df_segmento_filtrado no esté vacío antes de calcular
-                if not df_segmento_filtrado.empty:
-                    df_segmento_filtrado['FRECUENCIA_FILTRO'] = df_segmento_filtrado[meses_para_filtros].apply(lambda row: (row > 0).sum(), axis=1)
-                    total_comprado_filtro = df_segmento_filtrado[meses_para_filtros].sum(axis=1)
-                    df_segmento_filtrado['PROMEDIO_FILTRO'] = total_comprado_filtro / num_meses_filtros
-                else:
-                     # Si el dataframe está vacío después del filtro de rubro, añadir las columnas calculadas vacías
-                     df_segmento_filtrado['FRECUENCIA_FILTRO'] = pd.Series(dtype=float)
-                     df_segmento_filtrado['PROMEDIO_FILTRO'] = pd.Series(dtype=float)
-
-                # --- FIN CALCULOS PARA FILTRADO ---
-
-
-                # --- APLICAR FILTROS ---
-                df_segmento_final = df_segmento_filtrado[
-                    (df_segmento_filtrado['FRECUENCIA_FILTRO'] >= segmento_frecuencia[0]) &
-                    (df_segmento_filtrado['FRECUENCIA_FILTRO'] <= segmento_frecuencia[1]) &
-                    (df_segmento_filtrado['PROMEDIO_FILTRO'] >= min_promedio) &
-                    (df_segmento_filtrado['PROMEDIO_FILTRO'] <= max_promedio)
-                ].copy()
-                # --- FIN APLICAR FILTROS ---
 
             # --- MOSTRAR SEGMENTO FILTRADO ---
             st.subheader(f"📋 Segmento Filtrado ({len(df_segmento_final)} clientes)")
             # Columnas a mostrar en la tabla del segmento
-            # Eliminamos 'CLASE_CLIENTE' como solicitaste
+            # Mantenemos las columnas definidas en tu código original, incluyendo CLASE
+            # Añadimos los nombres dinámicos para Frecuencia y Promedio
             columnas_a_mostrar = [
                 "CODIGO",
                 "NOM_LEGAL",
-                "CLASE", # Mantener la CLASE original si es útil
+                "CLASE", # Mantenemos la CLASE original si es útil
                 "E_MAIL",
                 "TELEFONO",
                 "PROVINCIA",
-                 f"Frecuencia ({num_meses_filtros}m)", # Renombrar para claridad
-                 f"Promedio ({num_meses_filtros}m incl. 0)", # Renombrar para claridad
+                f"Frecuencia ({num_meses_filtros}m)", # Nombre dinámico
+                f"Promedio ({num_meses_filtros}m incl. 0)", # Nombre dinámico para el nuevo promedio
             ]
 
-            # Asegurarse de que las columnas calculadas existan antes de intentar renombrar
-            # Esto también cubre el caso donde num_meses_filtros es 0 y df_segmento_final está vacío
-            nombres_calculados = {
-                'FRECUENCIA_FILTRO': f"Frecuencia ({num_meses_filtros}m)",
-                'PROMEDIO_FILTRO': f"Promedio ({num_meses_filtros}m incl. 0)"
+            # Renombrar las columnas calculadas para que coincidan con los nombres a mostrar
+            # Solo intentamos renombrar si las columnas originales existen (ej: si num_meses_filtros > 0)
+            nombres_calculados_map = {
+                 'FRECUENCIA_FILTRO': f"Frecuencia ({num_meses_filtros}m)",
+                 'PROMEDIO_FILTRO': f"Promedio ({num_meses_filtros}m incl. 0)"
             }
-            columnas_en_df_final = df_segmento_final.columns
-
-            # Renombrar solo si las columnas originales existen
-            cols_to_rename = {k: v for k, v in nombres_calculados.items() if k in columnas_en_df_final}
+            cols_to_rename = {k: v for k, v in nombres_calculados_map.items() if k in df_segmento_final.columns}
             if cols_to_rename:
                  df_segmento_final.rename(columns=cols_to_rename, inplace=True)
 
-
-            # Asegurarse de que solo mostramos columnas que realmente existen en el dataframe final
+            # Asegurarnos de que solo mostramos columnas que realmente existen en el dataframe final
             columnas_a_mostrar_existentes = [col for col in columnas_a_mostrar if col in df_segmento_final.columns]
 
-
             # Formatear el promedio para mostrar en la tabla
-            # Asegurarse de que la columna de promedio exista antes de formatear
-            nombre_col_promedio = f"Promedio ({num_meses_filtros}m incl. 0)"
-            if nombre_col_promedio in columnas_a_mostrar_existentes:
+            nombre_col_promedio_final = f"Promedio ({num_meses_filtros}m incl. 0)"
+            if nombre_col_promedio_final in columnas_a_mostrar_existentes:
                  styled_segment_df = df_segmento_final[columnas_a_mostrar_existentes].style \
-                     .format({nombre_col_promedio: "${:,.0f}"})
+                     .format({nombre_col_promedio_final: "${:,.0f}"})
             else:
-                 # Si no hay datos o columna de promedio, mostrar el dataframe sin formato especial en esa columna
+                 # Si la columna de promedio no existe (ej: 0 meses de datos), mostrar sin formato especial
                  styled_segment_df = df_segmento_final[columnas_a_mostrar_existentes]
 
 
             st.dataframe(styled_segment_df, use_container_width=True)
 
-            # Análisis del segmento (opcional)
-            # Solo mostrar el gráfico si hay datos en el segmento final
-            if not df_segmento_final.empty:
-                st.markdown("### 📊 Análisis del Segmento")
-                col_seg1 = st.columns(1)[0]
-                with col_seg1:
-                    # Podríamos graficar la distribución de la CLASE_CLIENTE original si es relevante para el segmento
-                    st.markdown("#### Distribución de Clases de Clientes (Clasificación Original)")
-                    # Asegurarse de que 'CLASE_CLIENTE' existe en el df final (debería existir si no está vacío)
-                    if 'CLASE_CLIENTE' in df_segmento_final.columns:
-                        clase_counts = df_segmento_final['CLASE_CLIENTE'].value_counts()
-                        if not clase_counts.empty: # Asegurarse de que hay counts para graficar
-                             fig_clase, ax_clase = plt.subplots()
-                             ax_clase.pie(clase_counts, labels=clase_counts.index, autopct='%1.1f%%', startangle=90)
-                             st.pyplot(fig_clase)
-                        else:
-                             st.info("No hay datos de clases de clientes en el segmento filtrado para mostrar el gráfico.")
-                    else:
-                         st.info("La columna 'CLASE_CLIENTE' no está disponible en el dataframe filtrado.")
+            # --- CAMBIO: Eliminar el bloque de análisis del segmento (incluida la gráfica) ---
+            # Eliminamos todo el bloque que empieza con st.markdown("### 📊 Análisis del Segmento")
+            # --- FIN CAMBIO ---
 
 else:
     st.info("⬆️ Por favor, sube un archivo Excel para comenzar el análisis.")
